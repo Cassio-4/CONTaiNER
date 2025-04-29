@@ -12,18 +12,21 @@ from torch.nn import CrossEntropyLoss
 from torch.utils.data import DataLoader, RandomSampler, SequentialSampler, TensorDataset
 from tqdm import tqdm, trange
 from crf import CRFInference
+from torch.optim import AdamW
 
 
 from transformers import (
-    AdamW,
     BertConfig,
+    AutoTokenizer,
+    ModernBertConfig,
     BertTokenizer,
     set_seed
 )
-from src.utils import (
+from utils import (
     convert_examples_to_features,
     read_examples_from_file,
     BertForTokenClassification,
+    ModernBertForTokenClassification,
     get_labels, filtered_tp_counts)
 
 logger = logging.getLogger(__name__)
@@ -616,7 +619,7 @@ def main():
     # Use cross entropy ignore index as padding label id so that only real label ids contribute to the loss later
     pad_token_label_id = CrossEntropyLoss().ignore_index
 
-    config = BertConfig.from_pretrained(
+    config = ModernBertConfig.from_pretrained(
         args.config_name if args.config_name else args.model_name_or_path,
         num_labels=num_labels,
         id2label={str(i): label for i, label in enumerate(labels_train)},
@@ -627,12 +630,13 @@ def main():
     TOKENIZER_ARGS = ["do_lower_case", "strip_accents", "keep_accents", "use_fast"]
 
     tokenizer_args = {k: v for k, v in vars(args).items() if v is not None and k in TOKENIZER_ARGS}
-    tokenizer = BertTokenizer.from_pretrained(
+
+    tokenizer = AutoTokenizer.from_pretrained(
         args.tokenizer_name if args.tokenizer_name else args.model_name_or_path,
         cache_dir=args.cache_dir if args.cache_dir else None,
         **tokenizer_args,
     )
-    model = BertForTokenClassification.from_pretrained(
+    model = ModernBertForTokenClassification.from_pretrained(
         args.model_name_or_path,
         from_tf=bool(".ckpt" in args.model_name_or_path),
         config=config,

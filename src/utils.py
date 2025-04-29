@@ -7,7 +7,7 @@ import torch.nn.functional as F
 from collections import defaultdict, Counter
 from torch import nn
 from torch.nn import CrossEntropyLoss
-from transformers import BertPreTrainedModel, BertModel
+from transformers import BertPreTrainedModel, ModernBertPreTrainedModel, BertModel, ModernBertPredictionHead, ModernBertModel
 from seqeval.metrics.sequence_labeling import get_entities
 
 logger = logging.getLogger(__name__)
@@ -134,6 +134,82 @@ def calculate_KL_or_euclidean(self, attention_mask, original_embedding_mu, origi
     return torch.mean(loss_final)
 
 
+class ModernBertForTokenClassification(ModernBertPreTrainedModel):
+    def __init__(self, config):
+        super().__init__(config)
+        self.num_labels = config.num_labels
+        self.embedding_dimension = config.task_specific_params['embedding_dimension']
+
+        self.model = ModernBertModel(config)
+        self.head = ModernBertPredictionHead(config)
+        self.dropout = nn.Dropout(config.hidden_dropout_prob)
+
+        self.projection = nn.Sequential(
+            nn.Linear(config.hidden_size, self.embedding_dimension + (config.hidden_size - self.embedding_dimension) // 2)
+        )
+
+        self.output_embedder_mu = nn.Sequential(
+            nn.ReLU(),
+            nn.Linear(config.hidden_size,
+                      self.embedding_dimension)
+        )
+
+        self.output_embedder_sigma = nn.Sequential(
+            nn.ReLU(),
+            nn.Linear(config.hidden_size,
+                      self.embedding_dimension)
+        )
+
+        # Initialize weights and apply final processing
+        self.post_init()
+
+
+    def forward(
+        self,
+        input_ids = None,
+        attention_mask = None,
+        sliding_window_mask = None,
+        position_ids = None,
+        inputs_embeds = None,
+        labels = None,
+        indices = None,
+        cu_seqlens = None,
+        max_seqlen = None,
+        batch_size = None,
+        seq_len = None,
+        loss_type=None, #
+        consider_mutual_O=False      
+    ):
+        self._maybe_set_compile()
+        outputs = self.model(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            sliding_window_mask=sliding_window_mask,
+            position_ids=position_ids,
+            inputs_embeds=inputs_embeds,
+            indices=indices,
+            cu_seqlens=cu_seqlens,
+            max_seqlen=max_seqlen,
+            batch_size=batch_size,
+            seq_len=seq_len
+        )
+        sequence_output = outputs[0]
+
+        sequence_output = self.head(sequence_output)
+        sequence_output = self.dropout(sequence_output)
+
+        original_embedding_mu = ((self.output_embedder_mu((sequence_output))))
+        original_embedding_sigma = (F.elu(self.output_embedder_sigma((sequence_output)))) + 1 + 1e-14
+        outputs = (original_embedding_mu, original_embedding_sigma,) + (outputs[0],) + outputs[2:]
+
+        if labels is not None:
+            loss = calculate_KL_or_euclidean(self, attention_mask, original_embedding_mu,
+                                                     original_embedding_sigma, labels, consider_mutual_O,
+                                                     loss_type=loss_type)
+            outputs = (loss,) + outputs
+        return outputs
+
+
 class BertForTokenClassification(BertPreTrainedModel): # modified the original huggingface BertForTokenClassification to incorporate gaussian
     def __init__(self, config):
         super().__init__(config)
@@ -170,8 +246,8 @@ class BertForTokenClassification(BertPreTrainedModel): # modified the original h
             head_mask=None,
             inputs_embeds=None,
             labels=None,
-            loss_type=None,
-            consider_mutual_O=False
+            loss_type=None, #
+            consider_mutual_O=False #
     ):
         outputs = self.bert(
             input_ids,
