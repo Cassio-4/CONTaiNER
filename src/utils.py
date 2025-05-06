@@ -7,7 +7,8 @@ import torch.nn.functional as F
 from collections import defaultdict, Counter
 from torch import nn
 from torch.nn import CrossEntropyLoss
-from transformers import BertPreTrainedModel, ModernBertPreTrainedModel, BertModel, ModernBertPredictionHead, ModernBertModel
+from transformers import BertPreTrainedModel, ModernBertPreTrainedModel, BertModel, ModernBertModel
+from transformers.models.modernbert.modeling_modernbert import ModernBertPredictionHead
 from seqeval.metrics.sequence_labeling import get_entities
 
 logger = logging.getLogger(__name__)

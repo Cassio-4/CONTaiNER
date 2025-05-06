@@ -14,7 +14,6 @@ from tqdm import tqdm, trange
 from crf import CRFInference
 from torch.optim import AdamW
 
-
 from transformers import (
     BertConfig,
     AutoTokenizer,
@@ -213,7 +212,6 @@ def entitywise_max(scores, tags, addone=0, num_labels = None):
         ret[:, t] = torch.max(masked, dim=1)[0]
     return ret
 
-
 def nearest_neighbor(args, rep_mus, rep_sigmas, rep_hidden_states, support_rep_mus, support_rep_sigmas, support_rep, support_tags, evaluation_criteria, num_labels):
     """
     Neariest neighbor decoder for the best named entity tag sequences
@@ -273,7 +271,6 @@ def _loss_kl(mu_i, sigma_i, mu_j, sigma_j, embed_dimension):
     ji_kl = 0.5 * (trace_fac + mu_diff_sq - embed_dimension - log_det)
     kl_d = 0.5 * (ij_kl + ji_kl)
     return kl_d
-
 
 def evaluate(args, model, tokenizer, labels, pad_token_label_id, mode, prefix=""):
     sup_dataset = read_and_load_examples(args, tokenizer, labels, pad_token_label_id, mode=args.support_path, mergeB=True)
@@ -368,7 +365,6 @@ def evaluate(args, model, tokenizer, labels, pad_token_label_id, mode, prefix=""
 
     return results, preds_list
 
-
 def read_and_load_examples(args, tokenizer, labels, pad_token_label_id, mode, mergeB=False):
     examples = read_examples_from_file(args.data_dir, mode)
     features, label_map = convert_examples_to_features(
@@ -434,7 +430,6 @@ def trans_stats(args, labels):
 
     return ret
 
-
 def get_tags(fname, labels, to_I=False):
     tag_lists = []
     tag_list = []
@@ -458,11 +453,10 @@ def get_tags(fname, labels, to_I=False):
 
     return tag_lists
 
-
-def main():
+def get_args():
     parser = argparse.ArgumentParser()
 
-    # Required parameters
+    #### REQUIRED ARGUMENTS ####
     parser.add_argument(
         "--data_dir",
         default=None,
@@ -508,7 +502,7 @@ def main():
         help="The file path for the test set.",
     )
 
-    # Other parameters
+    #### OTHER PARAMETERS ####
     parser.add_argument(
         "--labels-train",
         default="",
@@ -545,29 +539,20 @@ def main():
     )
     parser.add_argument("--do_train", action="store_true", help="Whether to run training.")
     parser.add_argument("--do_predict", action="store_true", help="Whether to run predictions on the test set.")
-
+    parser.add_argument("--do_finetune_support", action="store_true", help="Whether to finetune the model on the support set.")
     parser.add_argument("--train_batch_size", default=8, type=int, help="Batch size per GPU/CPU for training.")
-    parser.add_argument(
-        "--eval_batch_size", default=16, type=int, help="Batch size per GPU/CPU for evaluation."
-    )
+    parser.add_argument("--eval_batch_size", default=16, type=int, help="Batch size per GPU/CPU for evaluation.")
     parser.add_argument("--learning_rate", default=5e-5, type=float, help="The initial learning rate for Adam.")
     parser.add_argument("--weight_decay", default=0.0, type=float, help="Weight decay")
     parser.add_argument("--adam_epsilon", default=1e-8, type=float, help="Epsilon for Adam optimizer.")
     parser.add_argument("--max_grad_norm", default=1.0, type=float, help="Max gradient norm.")
-    parser.add_argument(
-        "--num_train_epochs", default=1, type=float, help="Total number of training epochs to perform."
-    )
-
+    parser.add_argument("--num_train_epochs", default=1, type=float, help="Total number of training epochs to perform.")
     parser.add_argument("--no_cuda", action="store_true", help="Avoid using CUDA when available")
-    parser.add_argument(
-        "--overwrite_output_dir", action="store_true", help="Overwrite the content of the output directory"
-    )
-
+    parser.add_argument("--overwrite_output_dir", action="store_true", help="Overwrite the content of the output directory")
     parser.add_argument("--seed", type=int, default=42, help="random seed for initialization")
     parser.add_argument("--n_classes", default=6, type=int, help="number of classes")
     parser.add_argument("--n_shots", default=5, type=int, help="number of shots.")
     parser.add_argument("--embedding_dimension", default=32, type=int, help="dimension of output embedding")
-    parser.add_argument("--do_finetune_support_only", default=True, type=bool, help="Whether to finetune the model on the support set.")
     parser.add_argument("--training_loss", type=str, default="KL", help="What type of loss to use, KL, euclidean, or joint of KL and classification")
     parser.add_argument("--finetune_loss", type=str, default="KL", help= "What type of loss to use, KL, euclidean, or joint of KL and classification")
     parser.add_argument("--evaluation_criteria", type=str, default="euclidean", help= "What type of loss to use, KL, euclidean, or euclidean_hidden_state")
@@ -590,7 +575,58 @@ def main():
                 args.output_dir
             )
         )
+    return args
 
+def get_model_config_and_tokenizer(args, num_labels, labels_train):
+    model_name = args.model_name_or_path
+    TOKENIZER_ARGS = ["do_lower_case", "strip_accents", "keep_accents", "use_fast"]
+    tokenizer_args = {k: v for k, v in vars(args).items() if v is not None and k in TOKENIZER_ARGS}
+
+    if 'modern' in model_name.lower():
+        config = ModernBertConfig.from_pretrained(
+            args.config_name if args.config_name else args.model_name_or_path,
+            num_labels=num_labels,
+            id2label={str(i): label for i, label in enumerate(labels_train)},
+            label2id={label: i for i, label in enumerate(labels_train)},
+            cache_dir=args.cache_dir if args.cache_dir else None,
+            task_specific_params={"embedding_dimension": args.embedding_dimension}
+        )
+        tokenizer = AutoTokenizer.from_pretrained(
+            args.tokenizer_name if args.tokenizer_name else args.model_name_or_path,
+            cache_dir=args.cache_dir if args.cache_dir else None,
+            **tokenizer_args,
+        )
+        model = ModernBertForTokenClassification.from_pretrained(
+            args.model_name_or_path,
+            from_tf=bool(".ckpt" in args.model_name_or_path),
+            config=config,
+            cache_dir=args.cache_dir if args.cache_dir else None
+        )
+    else:
+        config = BertConfig.from_pretrained(
+            args.config_name if args.config_name else args.model_name_or_path,
+            num_labels=num_labels,
+            id2label={str(i): label for i, label in enumerate(labels_train)},
+            label2id={label: i for i, label in enumerate(labels_train)},
+            cache_dir=args.cache_dir if args.cache_dir else None,
+            task_specific_params={"embedding_dimension": args.embedding_dimension}
+        )
+        tokenizer = BertTokenizer.from_pretrained(
+            args.tokenizer_name if args.tokenizer_name else args.model_name_or_path,
+            cache_dir=args.cache_dir if args.cache_dir else None,
+            **tokenizer_args,
+        )
+        model = BertForTokenClassification.from_pretrained(
+            args.model_name_or_path,
+            from_tf=bool(".ckpt" in args.model_name_or_path),
+            config=config,
+            cache_dir=args.cache_dir if args.cache_dir else None
+        )
+
+    return model, config, tokenizer, tokenizer_args
+
+def main():
+    args = get_args()
     # Setup CUDA, GPU & distributed training
     device = torch.device("cuda:" + str(args.select_gpu) if torch.cuda.is_available() and not args.no_cuda else "cpu")
     args.n_gpu = 0 if args.no_cuda else torch.cuda.device_count()
@@ -614,34 +650,11 @@ def main():
     # Set seed
     set_seeds(args)
     labels_train = get_labels(args.labels_train)
-    labels_test = get_labels(args.labels_test)
     num_labels = len(labels_train)
     # Use cross entropy ignore index as padding label id so that only real label ids contribute to the loss later
     pad_token_label_id = CrossEntropyLoss().ignore_index
 
-    config = ModernBertConfig.from_pretrained(
-        args.config_name if args.config_name else args.model_name_or_path,
-        num_labels=num_labels,
-        id2label={str(i): label for i, label in enumerate(labels_train)},
-        label2id={label: i for i, label in enumerate(labels_train)},
-        cache_dir=args.cache_dir if args.cache_dir else None,
-        task_specific_params={"embedding_dimension": args.embedding_dimension}
-    )
-    TOKENIZER_ARGS = ["do_lower_case", "strip_accents", "keep_accents", "use_fast"]
-
-    tokenizer_args = {k: v for k, v in vars(args).items() if v is not None and k in TOKENIZER_ARGS}
-
-    tokenizer = AutoTokenizer.from_pretrained(
-        args.tokenizer_name if args.tokenizer_name else args.model_name_or_path,
-        cache_dir=args.cache_dir if args.cache_dir else None,
-        **tokenizer_args,
-    )
-    model = ModernBertForTokenClassification.from_pretrained(
-        args.model_name_or_path,
-        from_tf=bool(".ckpt" in args.model_name_or_path),
-        config=config,
-        cache_dir=args.cache_dir if args.cache_dir else None
-    )
+    model, config, tokenizer, tokenizer_args = get_model_config_and_tokenizer(args, num_labels, labels_train)   
 
     model.to(args.device)
 
@@ -680,8 +693,10 @@ def main():
     # Evaluation
     results = {}
 
+    if args.do_finetune_support or args.do_predict:
+        labels_test = get_labels(args.labels_test)
     set_seeds(args)
-    if args.do_finetune_support_only:
+    if args.do_finetune_support:
         if args.silent == True:
             logging.disable(logging.ERROR)
         if args.saved_model_dir is None:
