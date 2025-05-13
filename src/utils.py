@@ -69,7 +69,6 @@ def remove_irrelevant_tokens_for_loss(self, attention_mask, original_embedding_m
     labels_straightened = labels.view(-1)[active_indices]
 
     # remove indices with negative labels only
-
     nonneg_indices = torch.where(labels_straightened >= 0)[0]
     output_embedding_mu = output_embedding_mu[nonneg_indices]
     output_embedding_sigma = output_embedding_sigma[nonneg_indices]
@@ -148,7 +147,7 @@ class ModernBertForTokenClassification(ModernBertPreTrainedModel):
 
         self.model = ModernBertModel(config)
         self.head = ModernBertPredictionHead(config)
-        self.dropout = nn.Dropout(config.hidden_dropout_prob)
+        self.dropout = nn.Dropout(config.classifier_dropout)
 
         self.projection = nn.Sequential(
             nn.Linear(config.hidden_size, self.embedding_dimension + (config.hidden_size - self.embedding_dimension) // 2)

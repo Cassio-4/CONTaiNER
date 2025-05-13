@@ -135,9 +135,14 @@ def train(args, train_dataset, model):
 
             model.train()
             batch = tuple(t.to(args.device) for t in batch)
-            inputs = {"input_ids": batch[0], "attention_mask": batch[1],
-                      "token_type_ids": batch[2], "labels": batch[3],"loss_type":args.training_loss,
-                      "consider_mutual_O": args.consider_mutual_O}
+            if 'Modern' in args.model_name_or_path:
+                inputs = {"input_ids": batch[0], "attention_mask": batch[1],
+                          "labels": batch[3],"loss_type":args.training_loss,
+                          "consider_mutual_O": args.consider_mutual_O}
+            else:
+                inputs = {"input_ids": batch[0], "attention_mask": batch[1],
+                          "token_type_ids": batch[2], "labels": batch[3],
+                          "loss_type":args.training_loss, "consider_mutual_O": args.consider_mutual_O} 
 
             outputs = model(**inputs)
             loss = outputs[0]
