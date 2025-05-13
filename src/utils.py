@@ -56,9 +56,14 @@ def euclidean_distance(a, b, normalize=False):
 
 
 def remove_irrelevant_tokens_for_loss(self, attention_mask, original_embedding_mu, original_embedding_sigma, labels):
+    # get the active indices of the attention mask, that is, the tokens that are not padding
     active_indices = attention_mask.view(-1) == 1
     active_indices = torch.where(active_indices == True)[0]
-
+    # obtain three tensors of the same size
+    # output_embedding_mu and output_embedding_sigma shape's are (num_active_tokens, embedding_dimension), 
+    # where num_active_tokens is the total number of non-padding tokens across all sequences in the batch
+    # labels_straightened is of shape (active_tokens)
+    # the result are all valid tokens, their embeddings and their labels
     output_embedding_mu = original_embedding_mu.view(-1, self.embedding_dimension)[active_indices]
     output_embedding_sigma = original_embedding_sigma.view(-1, self.embedding_dimension)[active_indices]
     labels_straightened = labels.view(-1)[active_indices]
@@ -263,7 +268,12 @@ class BertForTokenClassification(BertPreTrainedModel): # modified the original h
         original_embedding_mu = ((self.output_embedder_mu((sequence_output))))
         original_embedding_sigma = (F.elu(self.output_embedder_sigma((sequence_output)))) + 1 + 1e-14
         outputs = (original_embedding_mu, original_embedding_sigma,) + (outputs[0],) + outputs[2:]
-
+        """
+        original_embedding_mu,          # Mean embeddings
+        original_embedding_sigma,       # Variance embeddings
+        outputs[0],                     # First element of the original outputs (e.g., logits)
+        outputs[2], outputs[3], ...  
+        """
         if labels is not None:
             loss = calculate_KL_or_euclidean(self, attention_mask, original_embedding_mu,
                                                      original_embedding_sigma, labels, consider_mutual_O,
